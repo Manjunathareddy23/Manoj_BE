@@ -92,8 +92,9 @@ const initDatabaseWithRetry = async (maxAttempts = 5, delaySec = 5) => {
       connection.release();
       return true;
     } catch (err) {
-      const msg = err && (err.message || String(err));
-      console.error(`❌ Database connection attempt ${attempt}/${maxAttempts} failed: ${msg}`);
+      const code = err && err.code ? ` [${err.code}]` : '';
+      const msg  = (err && (err.message || String(err))) || '(no message)';
+      console.error(`❌ Database connection attempt ${attempt}/${maxAttempts} failed:${code} ${msg}`);
       if (attempt < maxAttempts) {
         console.log(`⏳ Retrying in ${delaySec}s...`);
         await new Promise((resolve) => setTimeout(resolve, delaySec * 1000));
