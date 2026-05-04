@@ -44,11 +44,8 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
         customer_phone: customerPhone || '9999999999',
         customer_name:  customerName  || 'Customer',
       },
-      // Cashfree requires HTTPS for return_url and notify_url — omit on localhost
+      // Cashfree requires whitelisted domain for return_url — omit to avoid session invalid error
       order_meta: {
-        ...(frontendUrl.startsWith('https://')
-          ? { return_url: `${frontendUrl}/payment/return/${appOrderId}?cf_order_id=${cfOrderId}` }
-          : {}),
         ...(backendUrl.startsWith('https://')
           ? { notify_url: `${backendUrl}/api/payments/cashfree/webhook` }
           : {}),
