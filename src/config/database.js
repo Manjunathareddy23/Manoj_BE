@@ -11,8 +11,8 @@ const dbName     = process.env.DB_NAME     || process.env.MYSQL_ADDON_DB;
 const dbPort     = Number(process.env.DB_PORT || process.env.MYSQL_ADDON_PORT) || 3306;
 
 if (!dbHost || !dbUser || !dbName) {
-  throw new Error(
-    'Database configuration is incomplete. Please set DB_HOST, DB_USER, DB_PASSWORD, DB_NAME ' +
+  console.error(
+    '❌ Database configuration is incomplete. Please set DB_HOST, DB_USER, DB_PASSWORD, DB_NAME ' +
     '(or MYSQL_ADDON_HOST, MYSQL_ADDON_USER, MYSQL_ADDON_PASSWORD, MYSQL_ADDON_DB for Clever Cloud) ' +
     'in your environment variables.'
   );

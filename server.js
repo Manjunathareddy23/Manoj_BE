@@ -82,28 +82,40 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-// Server startup
-const startServer = async () => {
-  try {
-    // Initialize database tables
-    await initializeDatabase();
-
-    // Test database connection
-    const connection = await pool.getConnection();
-    console.log('✅ Database connected successfully');
-    connection.release();
-
-    app.listen(PORT, () => {
-      console.log(`🚀 FarmBridge API server running on http://localhost:${PORT}`);
-      console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    });
-  } catch (error) {
-    console.error('❌ Failed to start server:', error.message || error);
-    process.exit(1);
+// Retry DB initialization up to maxAttempts times, waiting delaySec between tries.
+const initDatabaseWithRetry = async (maxAttempts = 5, delaySec = 5) => {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await initializeDatabase();
+      const connection = await pool.getConnection();
+      console.log('✅ Database connected successfully');
+      connection.release();
+      return true;
+    } catch (err) {
+      const msg = err && (err.message || String(err));
+      console.error(`❌ Database connection attempt ${attempt}/${maxAttempts} failed: ${msg}`);
+      if (attempt < maxAttempts) {
+        console.log(`⏳ Retrying in ${delaySec}s...`);
+        await new Promise((resolve) => setTimeout(resolve, delaySec * 1000));
+      }
+    }
   }
+  console.error('❌ Could not connect to the database after all attempts. Check your DB_* environment variables on Render.');
+  return false;
 };
 
-startServer();
+// Bind the HTTP port first so Render's port scan succeeds,
+// then initialise the database in the background.
+app.listen(PORT, () => {
+  console.log(`🚀 FarmBridge API server running on http://localhost:${PORT}`);
+  console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  initDatabaseWithRetry().then((ok) => {
+    if (!ok) {
+      console.error('⚠️  Server is running but the database is unavailable. API calls requiring DB will fail.');
+    }
+  });
+});
 
 module.exports = app;
