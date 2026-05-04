@@ -10,10 +10,14 @@ const initializeDatabase = async () => {
         id INT PRIMARY KEY AUTO_INCREMENT,
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255),
+        google_id VARCHAR(255) UNIQUE,
+        name VARCHAR(255),
         first_name VARCHAR(100),
         last_name VARCHAR(100),
         role ENUM('farmer', 'consumer') NOT NULL,
         phone VARCHAR(20),
+        whatsapp VARCHAR(20),
+        place VARCHAR(255),
         address TEXT,
         city VARCHAR(100),
         state VARCHAR(100),
@@ -35,6 +39,7 @@ const initializeDatabase = async () => {
         price DECIMAL(10, 2) NOT NULL,
         weight_per_bag INT,
         bags INT DEFAULT 0,
+        total_weight DECIMAL(10, 2),
         unit VARCHAR(50),
         category VARCHAR(100),
         image LONGBLOB,
@@ -70,21 +75,53 @@ const initializeDatabase = async () => {
     try {
       await connection.query(`ALTER TABLE orders ADD COLUMN payment_status VARCHAR(50) DEFAULT 'unpaid'`);
     } catch (err) {
-      if (!err.message.includes('Duplicate column')) throw err;
+      if (err.code !== 'ER_DUP_FIELDNAME') throw err;
     }
 
     // Add rejection_reason column if it doesn't exist
     try {
       await connection.query(`ALTER TABLE orders ADD COLUMN rejection_reason TEXT`);
     } catch (err) {
-      if (!err.message.includes('Duplicate column')) throw err;
+      if (err.code !== 'ER_DUP_FIELDNAME') throw err;
     }
 
     // Add delivery_date column if it doesn't exist
     try {
       await connection.query(`ALTER TABLE orders ADD COLUMN delivery_date TIMESTAMP NULL`);
     } catch (err) {
-      if (!err.message.includes('Duplicate column')) throw err;
+      if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+    }
+
+    // Add missing users columns if they don't exist (for existing databases)
+    for (const alter of [
+      // Add google_id without UNIQUE first to avoid failure if duplicates exist
+      `ALTER TABLE users ADD COLUMN google_id VARCHAR(255)`,
+      `ALTER TABLE users ADD COLUMN name VARCHAR(255)`,
+      `ALTER TABLE users ADD COLUMN whatsapp VARCHAR(20)`,
+      `ALTER TABLE users ADD COLUMN place VARCHAR(255)`,
+    ]) {
+      try {
+        await connection.query(alter);
+      } catch (err) {
+        // ER_DUP_FIELDNAME (1060) = column already exists; safe to ignore
+        if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+      }
+    }
+
+    // Add unique index on google_id if it doesn't already exist
+    try {
+      await connection.query(`ALTER TABLE users ADD UNIQUE INDEX idx_google_id (google_id)`);
+    } catch (err) {
+      // ER_DUP_KEYNAME (1061) = index already exists; safe to ignore
+      if (err.code !== 'ER_DUP_KEYNAME') throw err;
+    }
+
+    // Add missing products columns if they don't exist (for existing databases)
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN total_weight DECIMAL(10, 2)`);
+    } catch (err) {
+      // ER_DUP_FIELDNAME (1060) = column already exists; safe to ignore
+      if (err.code !== 'ER_DUP_FIELDNAME') throw err;
     }
 
     connection.release();

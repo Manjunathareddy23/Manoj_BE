@@ -21,11 +21,11 @@ const upload = multer({
 // Public routes
 router.get('/', getAllProducts);
 router.get('/search', searchProducts);
-router.get('/:id', getProduct);
 
-// Protected routes
-router.post('/', authenticateToken, checkRole(['farmer']), upload.single('image'), addProduct);
+// Protected routes (must be defined BEFORE /:id to avoid wildcard conflict)
 router.get('/farmer/my-products', authenticateToken, checkRole(['farmer']), getFarmerProducts);
+router.post('/', authenticateToken, checkRole(['farmer']), upload.single('image'), addProduct);
+router.get('/:id', getProduct);
 router.delete('/:id', authenticateToken, checkRole(['farmer']), deleteProduct);
 
 module.exports = router;
