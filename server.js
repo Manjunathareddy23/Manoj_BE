@@ -101,7 +101,7 @@ const initDatabaseWithRetry = async (maxAttempts = 5, delaySec = 5) => {
       }
     }
   }
-  console.error('❌ Could not connect to the database after all attempts. Check your DB_* environment variables on Render.');
+  console.error('❌ Could not connect to the database after all attempts. Check your MYSQL_ADDON_URI, MYSQL_ADDON_*, or DB_* environment variables on Render.');
   return false;
 };
 

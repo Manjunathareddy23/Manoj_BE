@@ -64,7 +64,9 @@ const poolConfig = {
   connectionLimit: 10,
   queueLimit: 0,
   // Always use SSL for remote cloud databases (Clever Cloud, Railway, etc.).
-  // rejectUnauthorized:false is required because these providers use private CAs.
+  // rejectUnauthorized:false is required because Clever Cloud uses a private CA
+  // that is not in Node.js's default trust store. This is the standard workaround
+  // documented by the provider; without it TLS handshake fails with CERT errors.
   ...(isCloudDb && {
     ssl: { rejectUnauthorized: false }
   }),
