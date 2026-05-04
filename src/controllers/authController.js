@@ -39,16 +39,19 @@ const googleLogin = async (req, res) => {
     
     const googleId = googlePayload.sub; // Google's unique user ID
     const email = googlePayload.email;
-    const name = googlePayload.name || 'User';
+    const fullName = googlePayload.name || 'User';
+    const nameParts = fullName.split(' ');
+    const firstName = nameParts[0] || 'User';
+    const lastName = nameParts.slice(1).join(' ') || '';
 
     if (!googleId || !email) {
       return res.status(400).json({ message: 'Invalid Google token payload' });
     }
 
-    // Try to find existing user by Google ID
-    const [users] = await pool.query(
-      'SELECT * FROM users WHERE google_id = ?',
-      [googleId]
+    // Try to find existing user by Google ID or email
+    let [users] = await pool.query(
+      'SELECT * FROM users WHERE google_id = ? OR email = ?',
+      [googleId, email]
     );
 
     let user;
@@ -57,19 +60,19 @@ const googleLogin = async (req, res) => {
       // Create new user with Google info and selected role
       try {
         const [result] = await pool.query(
-          'INSERT INTO users (name, email, google_id, role) VALUES (?, ?, ?, ?)',
-          [name, email, googleId, userRole]
+          'INSERT INTO users (first_name, last_name, email, google_id, role) VALUES (?, ?, ?, ?, ?)',
+          [firstName, lastName, email, googleId, userRole]
         );
         user = {
           id: result.insertId,
           google_id: googleId,
           role: userRole,
-          name: name,
+          first_name: firstName,
+          last_name: lastName,
           email: email,
         };
       } catch (dbError) {
         if (dbError.code === 'ER_DUP_ENTRY') {
-          // Email already exists (possibly from email signup)
           return res.status(400).json({
             message: 'Email already registered. Please sign in instead.',
           });
@@ -78,6 +81,11 @@ const googleLogin = async (req, res) => {
       }
     } else {
       user = users[0];
+      // Update google_id if missing
+      if (!user.google_id) {
+        await pool.query('UPDATE users SET google_id = ? WHERE id = ?', [googleId, user.id]);
+        user.google_id = googleId;
+      }
     }
 
     // Create JWT token
@@ -91,7 +99,7 @@ const googleLogin = async (req, res) => {
       token: jwtToken,
       user: {
         id: user.id,
-        name: user.name,
+        name: `${user.first_name || ''} ${user.last_name || ''}`.trim(),
         email: user.email,
         role: user.role,
       },
@@ -148,9 +156,12 @@ const updateProfile = async (req, res) => {
     const userId = req.user.id;
 
     // DB columns: whatsapp (phone), place (location)
+    const nameParts = (name || '').split(' ');
+    const firstName = nameParts[0] || null;
+    const lastName = nameParts.slice(1).join(' ') || null;
     await pool.query(
-      'UPDATE users SET name = ?, whatsapp = ?, place = ? WHERE id = ?',
-      [name || null, phone || null, location || null, userId]
+      'UPDATE users SET first_name = ?, last_name = ?, whatsapp = ?, place = ? WHERE id = ?',
+      [firstName, lastName, phone || null, location || null, userId]
     );
 
     const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);

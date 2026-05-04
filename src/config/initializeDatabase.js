@@ -80,6 +80,13 @@ const initializeDatabase = async () => {
       if (!err.message.includes('Duplicate column')) throw err;
     }
 
+    // Add google_id column to users if it doesn't exist
+    try {
+      await connection.query(`ALTER TABLE users ADD COLUMN google_id VARCHAR(255) NULL`);
+    } catch (err) {
+      if (!err.message.includes('Duplicate column')) throw err;
+    }
+
     // Add delivery_date column if it doesn't exist
     try {
       await connection.query(`ALTER TABLE orders ADD COLUMN delivery_date TIMESTAMP NULL`);
