@@ -27,9 +27,10 @@ const poolConfig = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  // Enable SSL for cloud databases (PlanetScale, Railway, etc.)
+  // Enable SSL for cloud databases; rejectUnauthorized:false is required for
+  // providers (Clever Cloud, Railway, etc.) that use self-signed or private CAs.
   ...(isProduction && {
-    ssl: { rejectUnauthorized: true }
+    ssl: { rejectUnauthorized: false }
   }),
 };
 
