@@ -1,5 +1,14 @@
 const pool = require('../config/database');
 
+// Convert image Buffer (LONGBLOB from MySQL) to base64 string
+const toBase64 = (p) => {
+  if (!p) return p;
+  if (p.image && Buffer.isBuffer(p.image)) {
+    p.image = p.image.toString('base64');
+  }
+  return p;
+};
+
 // Get All Products
 const getAllProducts = async (req, res) => {
   try {
@@ -7,7 +16,7 @@ const getAllProducts = async (req, res) => {
       'SELECT p.*, CONCAT(u.first_name, " ", u.last_name) as farmer_name FROM products p JOIN users u ON p.farmer_id = u.id'
     );
 
-    res.json(products);
+    res.json(products.map(toBase64));
   } catch (error) {
     console.error('Error fetching products:', error);
     res.status(500).json({ message: 'Fetch failed', error: error.message });
@@ -28,7 +37,7 @@ const getProduct = async (req, res) => {
       return res.status(404).json({ message: 'Product not found' });
     }
 
-    res.json(products[0]);
+    res.json(toBase64(products[0]));
   } catch (error) {
     console.error('Error fetching product:', error);
     res.status(500).json({ message: 'Fetch failed', error: error.message });
@@ -92,7 +101,7 @@ const getFarmerProducts = async (req, res) => {
       [farmerId]
     );
 
-    res.json(products);
+    res.json(products.map(toBase64));
   } catch (error) {
     console.error('Error fetching farmer products:', error);
     res.status(500).json({ message: 'Fetch failed', error: error.message });
@@ -113,7 +122,7 @@ const searchProducts = async (req, res) => {
       [`%${q}%`, `%${q}%`]
     );
 
-    res.json(products);
+    res.json(products.map(toBase64));
   } catch (error) {
     console.error('Error searching products:', error);
     res.status(500).json({ message: 'Search failed', error: error.message });
