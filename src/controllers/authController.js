@@ -147,9 +147,10 @@ const updateProfile = async (req, res) => {
     const { name, phone, location } = req.body;
     const userId = req.user.id;
 
+    // DB columns: whatsapp (phone), place (location)
     await pool.query(
-      'UPDATE users SET name = ?, phone = ?, location = ? WHERE id = ?',
-      [name, phone, location, userId]
+      'UPDATE users SET name = ?, whatsapp = ?, place = ? WHERE id = ?',
+      [name || null, phone || null, location || null, userId]
     );
 
     const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
