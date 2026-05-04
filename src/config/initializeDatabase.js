@@ -66,6 +66,13 @@ const initializeDatabase = async () => {
       )
     `);
 
+    // Add total_weight column to products if it doesn't exist
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN total_weight DECIMAL(10, 2) NULL`);
+    } catch (err) {
+      if (!err.message.includes('Duplicate column')) throw err;
+    }
+
     // Add payment_status column if it doesn't exist (for existing databases)
     try {
       await connection.query(`ALTER TABLE orders ADD COLUMN payment_status VARCHAR(50) DEFAULT 'unpaid'`);
