@@ -4,7 +4,7 @@ const pool = require('../config/database');
 const getAllProducts = async (req, res) => {
   try {
     const [products] = await pool.query(
-      'SELECT p.*, u.name as farmer_name FROM products p JOIN users u ON p.farmer_id = u.id'
+      'SELECT p.*, CONCAT(u.first_name, " ", u.last_name) as farmer_name FROM products p JOIN users u ON p.farmer_id = u.id'
     );
 
     res.json(products);
@@ -20,7 +20,7 @@ const getProduct = async (req, res) => {
     const { id } = req.params;
 
     const [products] = await pool.query(
-      'SELECT p.*, u.name as farmer_name FROM products p JOIN users u ON p.farmer_id = u.id WHERE p.id = ?',
+      'SELECT p.*, CONCAT(u.first_name, " ", u.last_name) as farmer_name FROM products p JOIN users u ON p.farmer_id = u.id WHERE p.id = ?',
       [id]
     );
 
@@ -109,7 +109,7 @@ const searchProducts = async (req, res) => {
     }
 
     const [products] = await pool.query(
-      'SELECT p.*, u.name as farmer_name FROM products p JOIN users u ON p.farmer_id = u.id WHERE p.name LIKE ? OR p.description LIKE ?',
+      'SELECT p.*, CONCAT(u.first_name, " ", u.last_name) as farmer_name FROM products p JOIN users u ON p.farmer_id = u.id WHERE p.name LIKE ? OR p.description LIKE ?',
       [`%${q}%`, `%${q}%`]
     );
 
