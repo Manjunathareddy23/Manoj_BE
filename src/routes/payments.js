@@ -5,24 +5,56 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-const CF_APP_ID     = process.env.CASHFREE_APP_ID;
-const CF_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
-const CF_ENV        = process.env.CASHFREE_ENV || 'production';
-const CF_BASE_URL   = CF_ENV === 'production'
-  ? 'https://api.cashfree.com/pg'
-  : 'https://sandbox.cashfree.com/pg';
 const CF_API_VERSION = '2023-08-01';
 
-const cfHeaders = {
-  'x-api-version':    CF_API_VERSION,
-  'x-client-id':      CF_APP_ID,
-  'x-client-secret':  CF_SECRET_KEY,
-  'Content-Type':     'application/json',
+// IMPORTANT: Read credentials per-request so env var changes take effect without redeploy
+const getCFConfig = () => {
+  const appId    = process.env.CASHFREE_APP_ID;
+  const secret   = process.env.CASHFREE_SECRET_KEY;
+  const env      = process.env.CASHFREE_ENV || 'production';
+  const baseUrl  = env === 'production'
+    ? 'https://api.cashfree.com/pg'
+    : 'https://sandbox.cashfree.com/pg';
+  return {
+    appId, secret, baseUrl,
+    headers: {
+      'x-api-version':   CF_API_VERSION,
+      'x-client-id':     appId,
+      'x-client-secret': secret,
+      'Content-Type':    'application/json',
+    },
+  };
 };
 
+// GET /api/payments/cashfree/test — verify Cashfree credentials are working (no auth needed)
+router.get('/cashfree/test', async (req, res) => {
+  const { appId, secret, baseUrl, headers } = getCFConfig();
+  if (!appId || !secret) {
+    return res.status(500).json({ ok: false, message: 'CASHFREE_APP_ID or CASHFREE_SECRET_KEY not set on server' });
+  }
+  try {
+    const testPayload = {
+      order_id: `test_${Date.now()}`,
+      order_amount: 1,
+      order_currency: 'INR',
+      customer_details: { customer_id: 'test_1', customer_email: 'test@test.com', customer_phone: '9999999999', customer_name: 'Test' },
+      order_meta: {},
+    };
+    const r = await axios.post(`${baseUrl}/orders`, testPayload, { headers });
+    res.json({ ok: true, order_status: r.data.order_status, payment_session_id: r.data.payment_session_id ? 'present' : 'missing', cf_order_id: r.data.cf_order_id });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.response?.data || err.message });
+  }
+});
+
 // POST /api/payments/cashfree/create
-// Creates a Cashfree order and returns payment_session_id
 router.post('/cashfree/create', authenticateToken, async (req, res) => {
+  const { appId, secret, baseUrl, headers } = getCFConfig();
+
+  if (!appId || !secret) {
+    return res.status(500).json({ message: 'Payment gateway not configured on server. Contact support.' });
+  }
+
   try {
     const { amount, appOrderId, customerName, customerEmail, customerPhone } = req.body;
 
@@ -30,29 +62,25 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Invalid amount' });
     }
 
-    const cfOrderId = `order_${appOrderId}_${Date.now()}`;
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const backendUrl  = process.env.BACKEND_URL  || '';
+    const cfOrderId = `cf_${appOrderId}_${Date.now()}`;
 
     const payload = {
       order_id:       cfOrderId,
-      order_amount:   Number(amount),
+      order_amount:   parseFloat(Number(amount).toFixed(2)),
       order_currency: 'INR',
       customer_details: {
         customer_id:    `cust_${req.user.id}`,
         customer_email: customerEmail || 'customer@farmbridgemarket.com',
-        customer_phone: customerPhone || '9999999999',
+        customer_phone: (customerPhone || '9999999999').replace(/\D/g, '').slice(-10),
         customer_name:  customerName  || 'Customer',
       },
-      // Cashfree requires whitelisted domain for return_url — omit to avoid session invalid error
-      order_meta: {
-        ...(backendUrl.startsWith('https://')
-          ? { notify_url: `${backendUrl}/api/payments/cashfree/webhook` }
-          : {}),
-      },
+      order_meta: {},
     };
 
-    const response = await axios.post(`${CF_BASE_URL}/orders`, payload, { headers: cfHeaders });
+    console.log('Creating Cashfree order:', { cfOrderId, amount: payload.order_amount, appId: appId.slice(0, 8) + '...' });
+
+    const response = await axios.post(`${baseUrl}/orders`, payload, { headers });
+    console.log('Cashfree order created:', response.data.cf_order_id, 'status:', response.data.order_status);
 
     res.json({
       cf_order_id:        response.data.cf_order_id || cfOrderId,
@@ -60,14 +88,15 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       payment_session_id: response.data.payment_session_id,
     });
   } catch (err) {
-    console.error('Cashfree create order error:', err.response?.data || err.message);
-    res.status(500).json({ message: 'Failed to create payment session', error: err.response?.data || err.message });
+    const errData = err.response?.data || err.message;
+    console.error('Cashfree create order error:', errData);
+    res.status(500).json({ message: 'Failed to create payment session', error: errData });
   }
 });
 
 // POST /api/payments/cashfree/verify
-// Verifies Cashfree payment by checking order status with Cashfree API
 router.post('/cashfree/verify', authenticateToken, async (req, res) => {
+  const { baseUrl, headers } = getCFConfig();
   try {
     const { cf_order_id, appOrderId } = req.body;
 
@@ -75,7 +104,7 @@ router.post('/cashfree/verify', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Missing cf_order_id' });
     }
 
-    const response = await axios.get(`${CF_BASE_URL}/orders/${cf_order_id}`, { headers: cfHeaders });
+    const response = await axios.get(`${baseUrl}/orders/${cf_order_id}`, { headers });
     const orderStatus = response.data.order_status;
 
     if (orderStatus === 'PAID') {
@@ -97,18 +126,17 @@ router.post('/cashfree/verify', authenticateToken, async (req, res) => {
 });
 
 // POST /api/payments/cashfree/webhook
-// Cashfree webhook — auto-marks order paid on server side
 router.post('/cashfree/webhook', async (req, res) => {
+  const { secret } = getCFConfig();
   try {
     const signature  = req.headers['x-webhook-signature'];
     const timestamp  = req.headers['x-webhook-timestamp'];
     const rawBody    = JSON.stringify(req.body);
 
-    // Verify webhook signature
-    if (signature && timestamp) {
+    if (signature && timestamp && secret) {
       const signedPayload = timestamp + rawBody;
       const expectedSig   = crypto
-        .createHmac('sha256', CF_SECRET_KEY)
+        .createHmac('sha256', secret)
         .update(signedPayload)
         .digest('base64');
       if (expectedSig !== signature) {
