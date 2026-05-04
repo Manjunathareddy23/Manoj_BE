@@ -128,7 +128,7 @@ const initializeDatabase = async () => {
     console.log('✅ Database tables initialized successfully');
     return true;
   } catch (error) {
-    console.error('❌ Error initializing database:', error.message);
+    console.error('❌ Error initializing database:', error.message || error);
     // Don't exit on error - tables might already exist
     return false;
   }
