@@ -91,9 +91,14 @@ const initializeDatabase = async () => {
     console.log('✅ Database tables initialized successfully');
     return true;
   } catch (error) {
-    console.error('❌ Error initializing database:', error.message);
-    // Don't exit on error - tables might already exist
-    return false;
+    console.error('❌ Error initializing database:', error.message || error.code || JSON.stringify(error));
+    console.error('DB config used:', {
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      database: process.env.DB_NAME,
+      port: process.env.DB_PORT,
+    });
+    throw error; // Let server.js handle the exit
   }
 };
 
