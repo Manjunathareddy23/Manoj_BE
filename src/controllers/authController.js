@@ -155,20 +155,22 @@ const updateProfile = async (req, res) => {
     const { name, phone, location } = req.body;
     const userId = req.user.id;
 
-    // DB columns: whatsapp (phone), place (location)
     const nameParts = (name || '').split(' ');
     const firstName = nameParts[0] || null;
     const lastName = nameParts.slice(1).join(' ') || null;
     await pool.query(
-      'UPDATE users SET first_name = ?, last_name = ?, whatsapp = ?, place = ? WHERE id = ?',
+      'UPDATE users SET first_name = ?, last_name = ?, phone = ?, address = ? WHERE id = ?',
       [firstName, lastName, phone || null, location || null, userId]
     );
 
     const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
-
+    const u = users[0];
     res.json({
       message: 'Profile updated',
-      user: users[0],
+      user: {
+        ...u,
+        name: `${u.first_name || ''} ${u.last_name || ''}`.trim(),
+      },
     });
   } catch (error) {
     console.error('Profile update error:', error);
