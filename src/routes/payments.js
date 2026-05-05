@@ -154,6 +154,24 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       });
     }
 
+    // ✅ Save cf_order_id to database so sync endpoint can find it later
+    try {
+      const pool = require('../config/database');
+      const [result] = await pool.execute(
+        'UPDATE orders SET cf_order_id = ? WHERE id = ?',
+        [response.data.cf_order_id, appOrderId]
+      );
+      console.log('[Create] Saved cf_order_id to database:', {
+        appOrderId,
+        cf_order_id: response.data.cf_order_id,
+        affectedRows: result.affectedRows,
+      });
+    } catch (dbErr) {
+      console.error('[Create] Failed to save cf_order_id to DB:', dbErr.message);
+      // Don't fail the payment creation if DB update fails - still return session to frontend
+      // Frontend can use sync endpoint with the cf_order_id we're returning
+    }
+
     // Return EXACTLY what Cashfree gave us
     res.json({
       cf_order_id:        response.data.cf_order_id,  // ← MUST be Cashfree's ID
