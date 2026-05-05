@@ -207,10 +207,14 @@ router.post('/cashfree/verify', authenticateToken, async (req, res) => {
 // (return_url cannot contain '#', so we use the backend as a clean redirect relay)
 router.get('/cashfree/return/:appOrderId', (req, res) => {
   const { appOrderId } = req.params;
-  const frontendUrl = (process.env.FRONTEND_URL || 'https://manjunathareddy26.github.io/Manoj_FE').replace(/\/$/, '');
+  // Always use the correct frontend URL - hardcoded for GitHub Pages
+  const frontendUrl = 'https://manjunathareddy26.github.io/Manoj_FE';
+  
   // Cashfree appends ?cf_order_id=xxx&payment_status=SUCCESS to the return_url
   const qs = new URLSearchParams(req.query).toString();
   const target = `${frontendUrl}/#/payment/return/${appOrderId}${qs ? '?' + qs : ''}`;
+  
+  console.log('[PaymentReturn] Redirecting to:', target);
   res.redirect(302, target);
 });
 
