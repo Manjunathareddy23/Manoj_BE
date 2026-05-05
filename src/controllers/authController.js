@@ -142,7 +142,13 @@ const getCurrentUser = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    res.json({ user: users[0] });
+    const u = users[0];
+    // profile_image is stored as a base64 string; MySQL returns a Buffer — convert back
+    if (u.profile_image && Buffer.isBuffer(u.profile_image)) {
+      u.profile_image = u.profile_image.toString('utf8');
+    }
+
+    res.json({ user: u });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ message: 'Fetch failed' });
@@ -152,19 +158,30 @@ const getCurrentUser = async (req, res) => {
 // Update Profile
 const updateProfile = async (req, res) => {
   try {
-    const { name, phone, location } = req.body;
+    const { name, phone, location, profileImage } = req.body;
     const userId = req.user.id;
 
     const nameParts = (name || '').split(' ');
     const firstName = nameParts[0] || null;
     const lastName = nameParts.slice(1).join(' ') || null;
-    await pool.query(
-      'UPDATE users SET first_name = ?, last_name = ?, phone = ?, address = ? WHERE id = ?',
-      [firstName, lastName, phone || null, location || null, userId]
-    );
+
+    if (profileImage !== undefined) {
+      await pool.query(
+        'UPDATE users SET first_name = ?, last_name = ?, phone = ?, address = ?, profile_image = ? WHERE id = ?',
+        [firstName, lastName, phone || null, location || null, profileImage || null, userId]
+      );
+    } else {
+      await pool.query(
+        'UPDATE users SET first_name = ?, last_name = ?, phone = ?, address = ? WHERE id = ?',
+        [firstName, lastName, phone || null, location || null, userId]
+      );
+    }
 
     const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [userId]);
     const u = users[0];
+    if (u.profile_image && Buffer.isBuffer(u.profile_image)) {
+      u.profile_image = u.profile_image.toString('utf8');
+    }
     res.json({
       message: 'Profile updated',
       user: {
