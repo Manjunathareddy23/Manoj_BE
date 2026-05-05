@@ -41,7 +41,9 @@ router.get('/cashfree/test', async (req, res) => {
       order_meta: {
         return_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/return/test',
         notify_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/webhook',
+        payment_methods: 'upi,card,app,netbanking',
       },
+      order_expiry_time: Math.floor(Date.now() / 1000) + 900,
     };
     const r = await axios.post(`${baseUrl}/orders`, testPayload, { headers });
     res.json({
@@ -83,6 +85,11 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
     const returnUrl   = `${backendUrl}/api/payments/cashfree/return/${appOrderId}`;
     const notifyUrl   = `${backendUrl}/api/payments/cashfree/webhook`;
 
+    // Validate and format customer phone: must be exactly 10 digits
+    let formattedPhone = (customerPhone || '9999999999').replace(/\D/g, '');
+    if (formattedPhone.length > 10) formattedPhone = formattedPhone.slice(-10);
+    if (formattedPhone.length < 10) formattedPhone = formattedPhone.padStart(10, '9');
+
     const payload = {
       order_id:       cfOrderId,
       order_amount:   parseFloat(Number(amount).toFixed(2)),
@@ -90,13 +97,17 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       customer_details: {
         customer_id:    `cust_${req.user.id}`,
         customer_email: customerEmail || 'customer@farmbridgemarket.com',
-        customer_phone: (customerPhone || '9999999999').replace(/\D/g, '').slice(-10),
+        customer_phone: formattedPhone,
         customer_name:  customerName  || 'Customer',
       },
       order_meta: {
         return_url: returnUrl,
         notify_url: notifyUrl,
+        // Specify allowed payment methods to improve session creation
+        payment_methods: 'upi,card,app,netbanking',
       },
+      // Add order expiry: 15 minutes from now (session timeout)
+      order_expiry_time: Math.floor(Date.now() / 1000) + 900,
     };
 
     console.log('Creating Cashfree order:', {
@@ -105,6 +116,14 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       appId: appId.slice(0, 8) + '...',
       returnUrl,
       baseUrl,
+      payload: {
+        order_id: payload.order_id,
+        order_amount: payload.order_amount,
+        order_currency: payload.order_currency,
+        customer_phone: payload.customer_details.customer_phone,
+        payment_methods: payload.order_meta.payment_methods,
+        order_expiry_time: payload.order_expiry_time,
+      },
     });
 
     const response = await axios.post(`${baseUrl}/orders`, payload, { headers });
@@ -114,6 +133,8 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       cf_order_id: response.data.cf_order_id,
       order_status: response.data.order_status,
       payment_session_id: response.data.payment_session_id ? `✓ (${response.data.payment_session_id.length} chars, starts with: ${response.data.payment_session_id.substring(0, 30)}...)` : '✗ MISSING',
+      cf_error_code: response.data.cf_error_code,
+      cf_error_message: response.data.cf_error_message,
     });
 
     if (!response.data.payment_session_id) {
