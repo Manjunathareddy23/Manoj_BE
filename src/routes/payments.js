@@ -64,6 +64,12 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
 
     const cfOrderId = `cf_${appOrderId}_${Date.now()}`;
 
+    // Build return URL so Cashfree knows where to redirect after payment
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://manjunathareddy26.github.io/Manoj_FE').replace(/\/$/, '');
+    const backendUrl  = (process.env.BACKEND_URL  || 'https://farmbridge-7yow.onrender.com').replace(/\/$/, '');
+    const returnUrl   = `${frontendUrl}/#/payment/return/${appOrderId}`;
+    const notifyUrl   = `${backendUrl}/api/payments/cashfree/webhook`;
+
     const payload = {
       order_id:       cfOrderId,
       order_amount:   parseFloat(Number(amount).toFixed(2)),
@@ -74,7 +80,10 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
         customer_phone: (customerPhone || '9999999999').replace(/\D/g, '').slice(-10),
         customer_name:  customerName  || 'Customer',
       },
-      order_meta: {},
+      order_meta: {
+        return_url: returnUrl,
+        notify_url: notifyUrl,
+      },
     };
 
     console.log('Creating Cashfree order:', { cfOrderId, amount: payload.order_amount, appId: appId.slice(0, 8) + '...' });

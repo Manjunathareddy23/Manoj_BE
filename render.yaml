@@ -36,7 +36,7 @@ services:
       - key: CASHFREE_ENV
         value: production
       - key: FRONTEND_URL
-        value: https://Manjunathareddy26.github.io
+        value: https://manjunathareddy26.github.io/Manoj_FE
       - key: BACKEND_URL
         sync: false
       - key: CLOUDINARY_CLOUD_NAME
