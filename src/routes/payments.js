@@ -464,6 +464,51 @@ router.post('/cashfree/webhook/test/:appOrderId', async (req, res) => {
   }
 });
 
+// POST /api/payments/mark-paid/:orderId (admin testing only)
+// Directly mark an order as paid (for testing/emergency only)
+router.post('/mark-paid/:orderId', authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const pool = require('../config/database');
+    
+    // Get order before update
+    const [orderBefore] = await pool.execute(
+      "SELECT id, status, payment_status FROM orders WHERE id = ?",
+      [orderId]
+    );
+    
+    if (!orderBefore.length) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    
+    console.log('[ManualPaid] Before:', orderBefore[0]);
+    
+    // Update order
+    const [result] = await pool.execute(
+      "UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ?",
+      [orderId]
+    );
+    
+    // Get order after update
+    const [orderAfter] = await pool.execute(
+      "SELECT id, status, payment_status FROM orders WHERE id = ?",
+      [orderId]
+    );
+    
+    console.log('[ManualPaid] After:', orderAfter[0]);
+    
+    res.json({
+      success: result.affectedRows > 0,
+      before: orderBefore[0],
+      after: orderAfter[0],
+      affectedRows: result.affectedRows,
+    });
+  } catch (err) {
+    console.error('[ManualPaid] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/payments/status/:orderId
 router.get('/status/:orderId', authenticateToken, async (req, res) => {
   try {
