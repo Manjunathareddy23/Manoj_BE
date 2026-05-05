@@ -280,6 +280,8 @@ router.get('/cashfree/return/:appOrderId', (req, res) => {
 });
 
 // POST /api/payments/cashfree/webhook
+// Webhook receives payment status updates from Cashfree
+// This is the RELIABLE way to verify payments (server-to-server)
 router.post('/cashfree/webhook', async (req, res) => {
   const { secret } = getCFConfig();
   try {
@@ -287,6 +289,13 @@ router.post('/cashfree/webhook', async (req, res) => {
     const timestamp  = req.headers['x-webhook-timestamp'];
     const rawBody    = JSON.stringify(req.body);
 
+    console.log('[Webhook] Received payment update:', {
+      signature: signature ? 'present' : 'missing',
+      timestamp,
+      body: JSON.stringify(req.body).substring(0, 500),
+    });
+
+    // Verify webhook signature if present
     if (signature && timestamp && secret) {
       const signedPayload = timestamp + rawBody;
       const expectedSig   = crypto
@@ -294,28 +303,52 @@ router.post('/cashfree/webhook', async (req, res) => {
         .update(signedPayload)
         .digest('base64');
       if (expectedSig !== signature) {
+        console.error('[Webhook] Invalid signature');
         return res.status(400).json({ message: 'Invalid webhook signature' });
       }
+      console.log('[Webhook] ✅ Signature verified');
     }
 
     const { data } = req.body;
-    if (data?.order?.order_status === 'PAID') {
-      // Extract app order ID from cf order_id format: order_{appOrderId}_{timestamp}
-      const parts = (data.order.order_id || '').split('_');
+    const orderStatus = data?.order?.order_status;
+    const cfOrderId = data?.order?.order_id;  // YOUR order_id: cf_{appOrderId}_{timestamp}
+
+    console.log('[Webhook] Payment status:', {
+      orderStatus,
+      cfOrderId,
+      cf_payment_id: data?.payment?.cf_payment_id,
+    });
+
+    if (orderStatus === 'PAID' && cfOrderId) {
+      // Extract app order ID from our custom order_id format: cf_{appOrderId}_{timestamp}
+      const parts = cfOrderId.split('_');
       const appOrderId = parts[1];
+
+      console.log('[Webhook] Payment PAID:', { cfOrderId, appOrderId });
+
       if (appOrderId) {
-        const pool = require('../config/database');
-        await pool.execute(
-          "UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ?",
-          [appOrderId]
-        );
+        try {
+          const pool = require('../config/database');
+          const [result] = await pool.execute(
+            "UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ?",
+            [appOrderId]
+          );
+          console.log('[Webhook] ✅ DB updated:', { appOrderId, affectedRows: result.affectedRows });
+        } catch (dbErr) {
+          console.error('[Webhook] DB update error (non-fatal):', dbErr.message);
+          // Continue anyway - webhook must return 200 to Cashfree
+        }
       }
+    } else {
+      console.log('[Webhook] Payment not PAID, skipping DB update:', { orderStatus, cfOrderId });
     }
 
+    // MUST return 200 to Cashfree
     res.json({ success: true });
   } catch (err) {
-    console.error('Cashfree webhook error:', err.message);
-    res.status(500).json({ message: 'Webhook processing failed' });
+    console.error('[Webhook] Error:', err.message);
+    // Even on error, return 200 to acknowledge receipt
+    res.status(200).json({ message: 'Webhook received' });
   }
 });
 
