@@ -38,12 +38,25 @@ router.get('/cashfree/test', async (req, res) => {
       order_amount: 1,
       order_currency: 'INR',
       customer_details: { customer_id: 'test_1', customer_email: 'test@test.com', customer_phone: '9999999999', customer_name: 'Test' },
-      order_meta: {},
+      order_meta: {
+        return_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/return/test',
+        notify_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/webhook',
+      },
     };
     const r = await axios.post(`${baseUrl}/orders`, testPayload, { headers });
-    res.json({ ok: true, order_status: r.data.order_status, payment_session_id: r.data.payment_session_id ? 'present' : 'missing', cf_order_id: r.data.cf_order_id });
+    res.json({
+      ok: true,
+      order_status: r.data.order_status,
+      payment_session_id: r.data.payment_session_id ? 'present ✓' : 'MISSING ✗',
+      cf_order_id: r.data.cf_order_id,
+      fullResponse: r.data,
+    });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.response?.data || err.message });
+    res.status(500).json({
+      ok: false,
+      error: err.response?.data || err.message,
+      status: err.response?.status,
+    });
   }
 });
 
@@ -86,10 +99,30 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       },
     };
 
-    console.log('Creating Cashfree order:', { cfOrderId, amount: payload.order_amount, appId: appId.slice(0, 8) + '...' });
+    console.log('Creating Cashfree order:', {
+      cfOrderId,
+      amount: payload.order_amount,
+      appId: appId.slice(0, 8) + '...',
+      returnUrl,
+      baseUrl,
+    });
 
     const response = await axios.post(`${baseUrl}/orders`, payload, { headers });
-    console.log('Cashfree order created:', response.data.cf_order_id, 'status:', response.data.order_status);
+    
+    console.log('Cashfree API response:', {
+      status: response.status,
+      cf_order_id: response.data.cf_order_id,
+      order_status: response.data.order_status,
+      payment_session_id: response.data.payment_session_id ? '✓ present' : '✗ MISSING',
+    });
+
+    if (!response.data.payment_session_id) {
+      console.error('ERROR: Cashfree returned no payment_session_id. Full response:', JSON.stringify(response.data));
+      return res.status(500).json({
+        message: 'Cashfree did not return a payment session',
+        details: response.data,
+      });
+    }
 
     res.json({
       cf_order_id:        response.data.cf_order_id || cfOrderId,
@@ -98,8 +131,16 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     const errData = err.response?.data || err.message;
-    console.error('Cashfree create order error:', errData);
-    res.status(500).json({ message: 'Failed to create payment session', error: errData });
+    console.error('Cashfree create order ERROR:', {
+      status: err.response?.status,
+      message: errData,
+      fullError: err.response?.data,
+    });
+    res.status(500).json({
+      message: 'Failed to create payment session',
+      error: errData,
+      details: err.response?.data?.message || err.response?.data,
+    });
   }
 });
 
