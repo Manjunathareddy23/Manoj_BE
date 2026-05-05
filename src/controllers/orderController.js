@@ -364,6 +364,41 @@ const getOrderTracking = async (req, res) => {
   }
 };
 
+
+// Delete Order (Consumer only — delivered or rejected orders)
+const deleteOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const consumerId = req.user.id;
+
+    const [rows] = await pool.query(
+      'SELECT id, consumer_id, status FROM orders WHERE id = ?',
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const order = rows[0];
+
+    if (order.consumer_id !== consumerId) {
+      return res.status(403).json({ message: 'Not authorised to delete this order' });
+    }
+
+    const deletableStatuses = ['delivered', 'rejected'];
+    if (!deletableStatuses.includes(order.status)) {
+      return res.status(400).json({ message: 'Only delivered or rejected orders can be deleted' });
+    }
+
+    await pool.query('DELETE FROM orders WHERE id = ?', [id]);
+
+    res.json({ message: 'Order deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting order:', error);
+    res.status(500).json({ message: 'Failed to delete order', error: error.message });
+  }
+};
 module.exports = {
   createOrder,
   getUserOrders,
@@ -374,4 +409,5 @@ module.exports = {
   updateOrderStatus,
   updatePaymentStatus,
   getOrderTracking,
+  deleteOrder,
 };

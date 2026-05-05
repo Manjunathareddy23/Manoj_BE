@@ -9,6 +9,7 @@ const {
   updateOrderStatus,
   updatePaymentStatus,
   getOrderTracking,
+  deleteOrder,
 } = require('../controllers/orderController');
 const { authenticateToken, checkRole } = require('../middleware/auth');
 
@@ -26,5 +27,6 @@ router.post('/:id/accept', authenticateToken, checkRole(['farmer']), acceptOrder
 router.post('/:id/reject', authenticateToken, checkRole(['farmer']), rejectOrder);
 router.put('/:id/status', authenticateToken, checkRole(['farmer']), updateOrderStatus);
 router.put('/:id/payment-status', authenticateToken, updatePaymentStatus);
+router.delete('/:id', authenticateToken, checkRole(['consumer']), deleteOrder);
 
 module.exports = router;
