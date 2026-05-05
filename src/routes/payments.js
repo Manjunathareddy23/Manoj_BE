@@ -41,6 +41,7 @@ router.get('/cashfree/test', async (req, res) => {
       order_meta: {
         return_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/return/test',
         notify_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/webhook',
+        // Note: Cashfree will append query params: ?cf_order_id=xxx&payment_status=SUCCESS/FAILED/PENDING
       },
     };
     const r = await axios.post(`${baseUrl}/orders`, testPayload, { headers });
@@ -80,6 +81,10 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
     // Use backend as relay for return_url — Cashfree rejects URLs containing '#' (HashRouter)
     // Backend relay reads Cashfree's appended query params and redirects to the frontend hash route
     const backendUrl  = (process.env.BACKEND_URL  || 'https://farmbridge-7yow.onrender.com').replace(/\/$/, '');
+    const frontendUrl = (process.env.FRONTEND_URL || 'https://manjunathareddy26.github.io/Manoj_FE').replace(/\/$/, '');
+    
+    // return_url: Cashfree redirects here after payment, replaces {order_id} with cf_order_id
+    // Using backend relay to avoid hash fragment issues with HashRouter
     const returnUrl   = `${backendUrl}/api/payments/cashfree/return/${appOrderId}`;
     const notifyUrl   = `${backendUrl}/api/payments/cashfree/webhook`;
 
@@ -101,6 +106,7 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       order_meta: {
         return_url: returnUrl,
         notify_url: notifyUrl,
+        // Note: Cashfree will append query params: ?cf_order_id=xxx&payment_status=SUCCESS/FAILED/PENDING
       },
     };
 
