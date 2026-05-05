@@ -113,7 +113,7 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       status: response.status,
       cf_order_id: response.data.cf_order_id,
       order_status: response.data.order_status,
-      payment_session_id: response.data.payment_session_id ? '✓ present' : '✗ MISSING',
+      payment_session_id: response.data.payment_session_id ? `✓ (${response.data.payment_session_id.length} chars, starts with: ${response.data.payment_session_id.substring(0, 30)}...)` : '✗ MISSING',
     });
 
     if (!response.data.payment_session_id) {
