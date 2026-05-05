@@ -64,10 +64,10 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
 
     const cfOrderId = `cf_${appOrderId}_${Date.now()}`;
 
-    // Build return URL so Cashfree knows where to redirect after payment
-    const frontendUrl = (process.env.FRONTEND_URL || 'https://manjunathareddy26.github.io/Manoj_FE').replace(/\/$/, '');
+    // Use backend as relay for return_url — Cashfree rejects URLs containing '#' (HashRouter)
+    // Backend relay reads Cashfree's appended query params and redirects to the frontend hash route
     const backendUrl  = (process.env.BACKEND_URL  || 'https://farmbridge-7yow.onrender.com').replace(/\/$/, '');
-    const returnUrl   = `${frontendUrl}/#/payment/return/${appOrderId}`;
+    const returnUrl   = `${backendUrl}/api/payments/cashfree/return/${appOrderId}`;
     const notifyUrl   = `${backendUrl}/api/payments/cashfree/webhook`;
 
     const payload = {
@@ -132,6 +132,18 @@ router.post('/cashfree/verify', authenticateToken, async (req, res) => {
     console.error('Cashfree verify error:', err.response?.data || err.message);
     res.status(500).json({ message: 'Payment verification failed', error: err.response?.data || err.message });
   }
+});
+
+// GET /api/payments/cashfree/return/:appOrderId
+// Cashfree redirects here after payment. We relay to the frontend hash route.
+// (return_url cannot contain '#', so we use the backend as a clean redirect relay)
+router.get('/cashfree/return/:appOrderId', (req, res) => {
+  const { appOrderId } = req.params;
+  const frontendUrl = (process.env.FRONTEND_URL || 'https://manjunathareddy26.github.io/Manoj_FE').replace(/\/$/, '');
+  // Cashfree appends ?cf_order_id=xxx&payment_status=SUCCESS to the return_url
+  const qs = new URLSearchParams(req.query).toString();
+  const target = `${frontendUrl}/#/payment/return/${appOrderId}${qs ? '?' + qs : ''}`;
+  res.redirect(302, target);
 });
 
 // POST /api/payments/cashfree/webhook
