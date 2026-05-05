@@ -33,6 +33,9 @@ router.get('/cashfree/test', async (req, res) => {
     return res.status(500).json({ ok: false, message: 'CASHFREE_APP_ID or CASHFREE_SECRET_KEY not set on server' });
   }
   try {
+    const expiryDate = new Date(Date.now() + 15 * 60 * 1000);
+    const expiryTimeISO = expiryDate.toISOString().split('Z')[0];
+    
     const testPayload = {
       order_id: `test_${Date.now()}`,
       order_amount: 1,
@@ -41,9 +44,8 @@ router.get('/cashfree/test', async (req, res) => {
       order_meta: {
         return_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/return/test',
         notify_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/webhook',
-        payment_methods: 'upi,card,app,netbanking',
       },
-      order_expiry_time: Math.floor(Date.now() / 1000) + 900,
+      order_expiry_time: expiryTimeISO,
     };
     const r = await axios.post(`${baseUrl}/orders`, testPayload, { headers });
     res.json({
@@ -90,6 +92,10 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
     if (formattedPhone.length > 10) formattedPhone = formattedPhone.slice(-10);
     if (formattedPhone.length < 10) formattedPhone = formattedPhone.padStart(10, '9');
 
+    // Calculate expiry time in ISO 8601 format (15 minutes from now)
+    const expiryDate = new Date(Date.now() + 15 * 60 * 1000);
+    const expiryTimeISO = expiryDate.toISOString().split('Z')[0]; // Remove Z, Cashfree wants local format
+
     const payload = {
       order_id:       cfOrderId,
       order_amount:   parseFloat(Number(amount).toFixed(2)),
@@ -103,11 +109,9 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       order_meta: {
         return_url: returnUrl,
         notify_url: notifyUrl,
-        // Specify allowed payment methods to improve session creation
-        payment_methods: 'upi,card,app,netbanking',
       },
-      // Add order expiry: 15 minutes from now (session timeout)
-      order_expiry_time: Math.floor(Date.now() / 1000) + 900,
+      // Expiry in ISO 8601 format (optional, but improves session stability)
+      order_expiry_time: expiryTimeISO,
     };
 
     console.log('Creating Cashfree order:', {
@@ -121,7 +125,6 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
         order_amount: payload.order_amount,
         order_currency: payload.order_currency,
         customer_phone: payload.customer_details.customer_phone,
-        payment_methods: payload.order_meta.payment_methods,
         order_expiry_time: payload.order_expiry_time,
       },
     });
@@ -132,7 +135,7 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       status: response.status,
       cf_order_id: response.data.cf_order_id,
       order_status: response.data.order_status,
-      payment_session_id: response.data.payment_session_id ? `✓ (${response.data.payment_session_id.length} chars, starts with: ${response.data.payment_session_id.substring(0, 30)}...)` : '✗ MISSING',
+      payment_session_id: response.data.payment_session_id ? `✓ (${response.data.payment_session_id.length} chars)` : '✗ MISSING',
       cf_error_code: response.data.cf_error_code,
       cf_error_message: response.data.cf_error_message,
     });
@@ -152,15 +155,23 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     const errData = err.response?.data || err.message;
+    const statusCode = err.response?.status || 500;
+    
     console.error('Cashfree create order ERROR:', {
-      status: err.response?.status,
-      message: errData,
-      fullError: err.response?.data,
+      status: statusCode,
+      message: errData?.message || errData,
+      cf_error_code: errData?.cf_error_code,
+      cf_error_message: errData?.cf_error_message,
+      details: errData,
     });
+    
+    // Return detailed error to client
     res.status(500).json({
       message: 'Failed to create payment session',
-      error: errData,
-      details: err.response?.data?.message || err.response?.data,
+      error: errData?.message || errData,
+      cf_error_code: errData?.cf_error_code,
+      cf_error_message: errData?.cf_error_message,
+      details: errData?.error_details || errData,
     });
   }
 });
