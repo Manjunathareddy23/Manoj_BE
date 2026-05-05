@@ -509,6 +509,102 @@ router.post('/mark-paid/:orderId', authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/payments/cashfree/sync/:appOrderId
+// Check payment status from Cashfree and update database if paid
+// This is called from frontend after payment redirect to verify and sync status
+router.post('/cashfree/sync/:appOrderId', authenticateToken, async (req, res) => {
+  try {
+    const { appOrderId } = req.params;
+    const { baseUrl, headers } = getCFConfig();
+    const pool = require('../config/database');
+
+    console.log(`\n[Sync] Checking Cashfree payment status for order ${appOrderId}`);
+
+    // Get order to find the cf_order_id we stored
+    const [orders] = await pool.execute(
+      "SELECT id, cf_order_id FROM orders WHERE id = ?",
+      [appOrderId]
+    );
+
+    if (!orders.length) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const cfOrderId = orders[0].cf_order_id;
+    
+    if (!cfOrderId || cfOrderId === 'null' || cfOrderId === 'undefined') {
+      console.log('[Sync] ⚠️  Order has no cf_order_id stored');
+      return res.json({ 
+        success: false, 
+        message: 'Cashfree order ID not found',
+        status: 'unknown',
+      });
+    }
+
+    console.log('[Sync] Found cf_order_id:', cfOrderId);
+
+    // Query Cashfree for payment status
+    try {
+      const paymentsRes = await axios.get(
+        `${baseUrl}/orders/pay/fetch/${cfOrderId}`,
+        { headers, timeout: 10000 }
+      );
+
+      const payments = paymentsRes.data;
+      const successPayment = Array.isArray(payments)
+        ? payments.find(p => p.payment_status === 'SUCCESS')
+        : null;
+
+      if (successPayment) {
+        console.log('[Sync] ✅ Payment SUCCESS confirmed by Cashfree');
+        
+        // Update database
+        const [result] = await pool.execute(
+          "UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ?",
+          [appOrderId]
+        );
+
+        console.log('[Sync] Updated order:', { appOrderId, affectedRows: result.affectedRows });
+
+        return res.json({
+          success: true,
+          status: 'PAID',
+          message: 'Payment confirmed and order updated',
+          updated: result.affectedRows > 0,
+        });
+      }
+
+      // Check latest payment status
+      const latestStatus = Array.isArray(payments) && payments[0]
+        ? payments[0].payment_status
+        : 'UNKNOWN';
+
+      console.log('[Sync] Payment status from Cashfree:', latestStatus);
+
+      return res.json({
+        success: false,
+        status: latestStatus,
+        message: `Payment status: ${latestStatus}`,
+      });
+
+    } catch (cfErr) {
+      console.error('[Sync] Cashfree API error:', cfErr.response?.data || cfErr.message);
+      return res.json({
+        success: false,
+        status: 'error',
+        message: 'Could not reach Cashfree API',
+      });
+    }
+
+  } catch (err) {
+    console.error('[Sync] Error:', err);
+    res.status(500).json({ 
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
 // GET /api/payments/status/:orderId
 router.get('/status/:orderId', authenticateToken, async (req, res) => {
   try {
