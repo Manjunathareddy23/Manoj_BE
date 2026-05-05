@@ -148,7 +148,12 @@ const getCurrentUser = async (req, res) => {
       u.profile_image = u.profile_image.toString('utf8');
     }
 
-    res.json({ user: u });
+    res.json({
+      user: {
+        ...u,
+        name: `${u.first_name || ''} ${u.last_name || ''}`.trim(),
+      },
+    });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ message: 'Fetch failed' });
