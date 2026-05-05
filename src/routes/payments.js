@@ -720,5 +720,60 @@ router.get('/diagnose/:orderId', authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/payments/manual-mark-paid/:orderId
+// TESTING ENDPOINT: Manually mark order as paid (for debugging when sync fails)
+// This is a last resort to fix payment status when webhook/sync don't work
+router.post('/manual-mark-paid/:orderId', authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const pool = require('../config/database');
+
+    console.log(`\n[ManualMarkPaid] Attempting to mark order ${orderId} as paid...`);
+
+    // Get current order status
+    const [orderBefore] = await pool.execute(
+      'SELECT id, payment_status, status FROM orders WHERE id = ?',
+      [orderId]
+    );
+
+    if (!orderBefore.length) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    console.log('[ManualMarkPaid] Before:', orderBefore[0]);
+
+    // Update to paid
+    const [result] = await pool.execute(
+      "UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ?",
+      [orderId]
+    );
+
+    // Get updated order
+    const [orderAfter] = await pool.execute(
+      'SELECT id, payment_status, status FROM orders WHERE id = ?',
+      [orderId]
+    );
+
+    console.log('[ManualMarkPaid] After:', orderAfter[0]);
+    console.log('[ManualMarkPaid] ✅ Successfully updated:', {
+      orderId,
+      affectedRows: result.affectedRows,
+      before: orderBefore[0],
+      after: orderAfter[0],
+    });
+
+    res.json({
+      success: result.affectedRows > 0,
+      message: `Order ${orderId} marked as PAID`,
+      before: orderBefore[0],
+      after: orderAfter[0],
+      affectedRows: result.affectedRows,
+    });
+  } catch (err) {
+    console.error('[ManualMarkPaid] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
