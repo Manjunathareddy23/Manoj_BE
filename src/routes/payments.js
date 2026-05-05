@@ -285,6 +285,11 @@ router.get('/cashfree/return/:appOrderId', (req, res) => {
 router.post('/cashfree/webhook', async (req, res) => {
   const { secret } = getCFConfig();
   try {
+    console.log('[Webhook] 🔔 Received webhook from Cashfree:', {
+      bodyKeys: Object.keys(req.body),
+      timestamp: new Date().toISOString(),
+    });
+
     const signature  = req.headers['x-webhook-signature'];
     const timestamp  = req.headers['x-webhook-timestamp'];
     const rawBody    = JSON.stringify(req.body);
@@ -324,7 +329,12 @@ router.post('/cashfree/webhook', async (req, res) => {
       const parts = cfOrderId.split('_');
       const appOrderId = parts[1];
 
-      console.log('[Webhook] Payment PAID:', { cfOrderId, appOrderId });
+      console.log('[Webhook] ✅ PAYMENT PAID - Processing:', { 
+        cfOrderId, 
+        appOrderId,
+        extractedParts: parts,
+        expectedFormat: 'cf_{appOrderId}_{timestamp}',
+      });
 
       if (appOrderId) {
         try {
@@ -333,14 +343,38 @@ router.post('/cashfree/webhook', async (req, res) => {
             "UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ?",
             [appOrderId]
           );
-          console.log('[Webhook] ✅ DB updated:', { appOrderId, affectedRows: result.affectedRows });
+          console.log('[Webhook] ✅ DB updated:', { 
+            appOrderId, 
+            affectedRows: result.affectedRows,
+            newPaymentStatus: 'paid',
+            newStatus: 'confirmed',
+          });
+          
+          // Log the updated order to verify
+          if (result.affectedRows > 0) {
+            const [updated] = await pool.execute(
+              "SELECT id, status, payment_status FROM orders WHERE id = ?",
+              [appOrderId]
+            );
+            console.log('[Webhook] ✅ Order verified after update:', updated[0]);
+          }
         } catch (dbErr) {
-          console.error('[Webhook] DB update error (non-fatal):', dbErr.message);
+          console.error('[Webhook] ❌ DB update error (non-fatal):', {
+            appOrderId,
+            error: dbErr.message,
+            code: dbErr.code,
+          });
           // Continue anyway - webhook must return 200 to Cashfree
         }
+      } else {
+        console.warn('[Webhook] ⚠️  Could not extract appOrderId:', { cfOrderId, parts });
       }
     } else {
-      console.log('[Webhook] Payment not PAID, skipping DB update:', { orderStatus, cfOrderId });
+      console.log('[Webhook] ℹ️  Payment not PAID, skipping DB update:', { 
+        orderStatus, 
+        cfOrderId,
+        reason: !orderStatus ? 'no orderStatus' : 'status is not PAID',
+      });
     }
 
     // MUST return 200 to Cashfree
