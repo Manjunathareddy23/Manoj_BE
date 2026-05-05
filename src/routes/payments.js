@@ -33,9 +33,6 @@ router.get('/cashfree/test', async (req, res) => {
     return res.status(500).json({ ok: false, message: 'CASHFREE_APP_ID or CASHFREE_SECRET_KEY not set on server' });
   }
   try {
-    const expiryDate = new Date(Date.now() + 15 * 60 * 1000);
-    const expiryTimeISO = expiryDate.toISOString().split('Z')[0];
-    
     const testPayload = {
       order_id: `test_${Date.now()}`,
       order_amount: 1,
@@ -45,7 +42,6 @@ router.get('/cashfree/test', async (req, res) => {
         return_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/return/test',
         notify_url: 'https://farmbridge-7yow.onrender.com/api/payments/cashfree/webhook',
       },
-      order_expiry_time: expiryTimeISO,
     };
     const r = await axios.post(`${baseUrl}/orders`, testPayload, { headers });
     res.json({
@@ -92,10 +88,6 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
     if (formattedPhone.length > 10) formattedPhone = formattedPhone.slice(-10);
     if (formattedPhone.length < 10) formattedPhone = formattedPhone.padStart(10, '9');
 
-    // Calculate expiry time in ISO 8601 format (15 minutes from now)
-    const expiryDate = new Date(Date.now() + 15 * 60 * 1000);
-    const expiryTimeISO = expiryDate.toISOString().split('Z')[0]; // Remove Z, Cashfree wants local format
-
     const payload = {
       order_id:       cfOrderId,
       order_amount:   parseFloat(Number(amount).toFixed(2)),
@@ -110,8 +102,6 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
         return_url: returnUrl,
         notify_url: notifyUrl,
       },
-      // Expiry in ISO 8601 format (optional, but improves session stability)
-      order_expiry_time: expiryTimeISO,
     };
 
     console.log('Creating Cashfree order:', {
@@ -125,7 +115,6 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
         order_amount: payload.order_amount,
         order_currency: payload.order_currency,
         customer_phone: payload.customer_details.customer_phone,
-        order_expiry_time: payload.order_expiry_time,
       },
     });
 
