@@ -135,6 +135,7 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       cf_error_message: response.data.cf_error_message,
     });
 
+    // CRITICAL: Validate Cashfree returned BOTH required fields
     if (!response.data.payment_session_id) {
       console.error('ERROR: Cashfree returned no payment_session_id. Full response:', JSON.stringify(response.data));
       return res.status(500).json({
@@ -143,8 +144,19 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
       });
     }
 
+    // CRITICAL: MUST use Cashfree's cf_order_id, not our generated one!
+    // Fallback to our ID will cause verification to fail with "order_not_found"
+    if (!response.data.cf_order_id) {
+      console.error('ERROR: Cashfree returned no cf_order_id. Full response:', JSON.stringify(response.data));
+      return res.status(500).json({
+        message: 'Cashfree did not return order ID. Payment gateway issue.',
+        details: response.data,
+      });
+    }
+
+    // Return EXACTLY what Cashfree gave us
     res.json({
-      cf_order_id:        response.data.cf_order_id || cfOrderId,
+      cf_order_id:        response.data.cf_order_id,  // ← MUST be Cashfree's ID
       order_id:           response.data.order_id,
       payment_session_id: response.data.payment_session_id,
     });
@@ -172,73 +184,81 @@ router.post('/cashfree/create', authenticateToken, async (req, res) => {
 });
 
 // POST /api/payments/cashfree/verify
+// IMPORTANT: cf_order_id is Cashfree's internal payment ID, NOT our order_id
+// Use /orders/pay/fetch/{cf_order_id} endpoint to fetch payments by Cashfree ID
 router.post('/cashfree/verify', authenticateToken, async (req, res) => {
   const { baseUrl, headers } = getCFConfig();
   try {
     const { cf_order_id, appOrderId } = req.body;
 
-    console.log('[CashfreeVerify] Verifying payment:', { cf_order_id, appOrderId });
+    console.log('[Verify] Received:', { cf_order_id, appOrderId });
 
-    if (!cf_order_id) {
+    if (!cf_order_id || cf_order_id === 'undefined') {
       return res.status(400).json({ success: false, message: 'Missing cf_order_id' });
     }
 
-    // Get payment status from Cashfree
-    const response = await axios.get(`${baseUrl}/orders/${cf_order_id}`, { headers });
-    const orderStatus = response.data.order_status;
+    // ✅ Use the payments endpoint with cf_order_id — this accepts Cashfree's internal ID
+    console.log('[Verify] Fetching payments for cf_order_id:', cf_order_id);
+    const paymentsRes = await axios.get(
+      `${baseUrl}/orders/pay/fetch/${cf_order_id}`,
+      { headers, timeout: 10000 }
+    );
 
-    console.log('[CashfreeVerify] Cashfree order status:', {
-      cf_order_id,
-      orderStatus,
-      order_amount: response.data.order_amount,
+    console.log('[Verify] Cashfree payments response:', {
+      payments_count: Array.isArray(paymentsRes.data) ? paymentsRes.data.length : 'not_array',
+      data: JSON.stringify(paymentsRes.data).substring(0, 500),
     });
 
-    if (orderStatus === 'PAID') {
-      // Try to update local database, but don't fail if it errors
-      // (payment is already verified with Cashfree)
+    // paymentsRes.data is an array of payment objects
+    const payments = paymentsRes.data;
+    const successPayment = Array.isArray(payments)
+      ? payments.find(p => p.payment_status === 'SUCCESS')
+      : null;
+
+    if (successPayment) {
+      console.log('[Verify] Payment SUCCESS found:', {
+        cf_order_id,
+        appOrderId,
+        payment_id: successPayment.cf_payment_id,
+      });
+
+      // Update DB
       if (appOrderId) {
         try {
           const pool = require('../config/database');
-          const result = await pool.execute(
+          await pool.execute(
             "UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ?",
             [appOrderId]
           );
-          console.log('[CashfreeVerify] Database updated:', { appOrderId, changes: result[0].affectedRows });
+          console.log('[Verify] DB updated for order:', appOrderId);
         } catch (dbErr) {
-          console.warn('[CashfreeVerify] Database update warning (payment still verified with Cashfree):', dbErr.message);
-          // Don't throw - payment is verified with Cashfree, DB update is just a side effect
+          console.error('[Verify] DB update failed (non-fatal):', dbErr.message);
+          // Don't throw - payment is verified with Cashfree
         }
       }
-
-      return res.json({ 
-        success: true, 
-        status: 'PAID', 
-        message: 'Payment verified successfully',
-        cf_order_id,
-        appOrderId,
-      });
+      return res.json({ success: true, status: 'PAID', cf_order_id, appOrderId });
     }
 
-    // Payment not in PAID status
-    console.log('[CashfreeVerify] Payment not PAID:', { cf_order_id, orderStatus });
-    res.json({ 
-      success: false, 
-      status: orderStatus, 
-      message: `Payment status: ${orderStatus}`,
-      cf_order_id,
-    });
+    // No successful payment found
+    const latestStatus = Array.isArray(payments) && payments[0]
+      ? payments[0].payment_status
+      : 'UNKNOWN';
+
+    console.log('[Verify] No SUCCESS payment found:', { cf_order_id, latestStatus });
+    return res.json({ success: false, status: latestStatus, cf_order_id });
+
   } catch (err) {
-    console.error('[CashfreeVerify] Error:', {
+    console.error('[Verify] Error:', {
       message: err.message,
-      cfError: err.response?.data,
       status: err.response?.status,
-      stack: err.stack,
+      cfError: err.response?.data,
     });
-    res.status(500).json({ 
+
+    return res.status(500).json({
       success: false,
-      message: 'Payment verification failed', 
+      message: 'Payment verification failed',
       error: err.response?.data?.message || err.message,
-      cf_error_code: err.response?.data?.cf_error_code,
+      cf_error: err.response?.data,
     });
   }
 });
