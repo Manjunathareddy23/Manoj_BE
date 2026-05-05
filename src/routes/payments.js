@@ -282,46 +282,54 @@ router.get('/cashfree/return/:appOrderId', (req, res) => {
 // POST /api/payments/cashfree/webhook
 // Webhook receives payment status updates from Cashfree
 // This is the RELIABLE way to verify payments (server-to-server)
+// ⚠️  NO AUTHENTICATION - Cashfree calls this, not our frontend
 router.post('/cashfree/webhook', async (req, res) => {
   const { secret } = getCFConfig();
   try {
-    console.log('[Webhook] 🔔 Received webhook from Cashfree:', {
-      bodyKeys: Object.keys(req.body),
-      timestamp: new Date().toISOString(),
-    });
+    const timestamp = new Date().toISOString();
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`[Webhook] 🔔 PAYMENT WEBHOOK RECEIVED at ${timestamp}`);
+    console.log(`${'='.repeat(80)}`);
 
     const signature  = req.headers['x-webhook-signature'];
-    const timestamp  = req.headers['x-webhook-timestamp'];
+    const webhookTimestamp  = req.headers['x-webhook-timestamp'];
     const rawBody    = JSON.stringify(req.body);
 
-    console.log('[Webhook] Received payment update:', {
-      signature: signature ? 'present' : 'missing',
-      timestamp,
-      body: JSON.stringify(req.body).substring(0, 500),
+    console.log('[Webhook] Headers:', {
+      signature: signature ? `present (${signature.substring(0, 20)}...)` : 'MISSING',
+      timestamp: webhookTimestamp,
+      contentType: req.headers['content-type'],
     });
 
+    console.log('[Webhook] Raw Body:', rawBody.substring(0, 1000));
+
     // Verify webhook signature if present
-    if (signature && timestamp && secret) {
-      const signedPayload = timestamp + rawBody;
+    if (signature && webhookTimestamp && secret) {
+      const signedPayload = webhookTimestamp + rawBody;
       const expectedSig   = crypto
         .createHmac('sha256', secret)
         .update(signedPayload)
         .digest('base64');
       if (expectedSig !== signature) {
-        console.error('[Webhook] Invalid signature');
+        console.error('[Webhook] ❌ INVALID SIGNATURE - Expected:', expectedSig, 'Got:', signature);
         return res.status(400).json({ message: 'Invalid webhook signature' });
       }
       console.log('[Webhook] ✅ Signature verified');
+    } else {
+      console.warn('[Webhook] ⚠️  No signature verification (missing headers)');
     }
 
     const { data } = req.body;
     const orderStatus = data?.order?.order_status;
     const cfOrderId = data?.order?.order_id;  // YOUR order_id: cf_{appOrderId}_{timestamp}
+    const cfPaymentId = data?.payment?.cf_payment_id;
+    const paymentAmount = data?.payment?.payment_amount;
 
-    console.log('[Webhook] Payment status:', {
+    console.log('[Webhook] Extracted Data:', {
       orderStatus,
       cfOrderId,
-      cf_payment_id: data?.payment?.cf_payment_id,
+      cfPaymentId,
+      paymentAmount,
     });
 
     if (orderStatus === 'PAID' && cfOrderId) {
@@ -336,53 +344,123 @@ router.post('/cashfree/webhook', async (req, res) => {
         expectedFormat: 'cf_{appOrderId}_{timestamp}',
       });
 
-      if (appOrderId) {
+      if (appOrderId && appOrderId !== 'undefined') {
         try {
           const pool = require('../config/database');
+          
+          // First, get the order details before update
+          const [orderBefore] = await pool.execute(
+            "SELECT id, status, payment_status FROM orders WHERE id = ?",
+            [appOrderId]
+          );
+          
+          if (!orderBefore.length) {
+            console.error('[Webhook] ❌ Order not found in database:', { appOrderId });
+            return res.status(200).json({ message: 'Webhook received but order not found' });
+          }
+          
+          console.log('[Webhook] Order BEFORE update:', orderBefore[0]);
+          
+          // Update the order
           const [result] = await pool.execute(
             "UPDATE orders SET payment_status = 'paid', status = 'confirmed' WHERE id = ?",
             [appOrderId]
           );
-          console.log('[Webhook] ✅ DB updated:', { 
+          
+          console.log('[Webhook] Update Result:', { 
             appOrderId, 
             affectedRows: result.affectedRows,
-            newPaymentStatus: 'paid',
-            newStatus: 'confirmed',
+            message: result.affectedRows > 0 ? 'Successfully updated' : 'NO ROWS UPDATED',
           });
           
-          // Log the updated order to verify
+          // Verify the update
           if (result.affectedRows > 0) {
             const [updated] = await pool.execute(
               "SELECT id, status, payment_status FROM orders WHERE id = ?",
               [appOrderId]
             );
-            console.log('[Webhook] ✅ Order verified after update:', updated[0]);
+            console.log('[Webhook] ✅ Order AFTER update:', updated[0]);
           }
         } catch (dbErr) {
-          console.error('[Webhook] ❌ DB update error (non-fatal):', {
+          console.error('[Webhook] ❌ DB Error:', {
             appOrderId,
             error: dbErr.message,
             code: dbErr.code,
+            sqlState: dbErr.sqlState,
           });
           // Continue anyway - webhook must return 200 to Cashfree
         }
       } else {
-        console.warn('[Webhook] ⚠️  Could not extract appOrderId:', { cfOrderId, parts });
+        console.warn('[Webhook] ⚠️  Could not extract valid appOrderId:', { cfOrderId, parts, appOrderId });
       }
     } else {
-      console.log('[Webhook] ℹ️  Payment not PAID, skipping DB update:', { 
+      console.log('[Webhook] ℹ️  Not processing as PAID:', { 
         orderStatus, 
         cfOrderId,
-        reason: !orderStatus ? 'no orderStatus' : 'status is not PAID',
       });
     }
 
+    console.log(`[Webhook] ✅ Webhook processed, returning 200 to Cashfree`);
+    console.log(`${'='.repeat(80)}\n`);
+
     // MUST return 200 to Cashfree
-    res.json({ success: true });
+    res.json({ success: true, message: 'Webhook received' });
   } catch (err) {
-    console.error('[Webhook] Error:', err.message);
+    console.error('[Webhook] ❌ Unexpected Error:', err);
     // Even on error, return 200 to acknowledge receipt
-    res.status(200).json({ message: 'Webhook received' });
+    res.status(200).json({ message: 'Webhook received', error: err.message });
+  }
+});
+
+// POST /api/payments/cashfree/webhook/test/:appOrderId
+// Test endpoint to manually simulate a webhook payment for an order
+// Usage: POST http://localhost:5000/api/payments/cashfree/webhook/test/123
+router.post('/cashfree/webhook/test/:appOrderId', async (req, res) => {
+  try {
+    const { appOrderId } = req.params;
+    
+    console.log(`\n[WebhookTest] Testing webhook for order ${appOrderId}\n`);
+    
+    // Simulate Cashfree webhook payload
+    const mockWebhookPayload = {
+      data: {
+        order: {
+          order_id: `cf_${appOrderId}_${Date.now()}`,
+          order_status: 'PAID',
+          order_amount: 1.0,
+        },
+        payment: {
+          cf_payment_id: '12345test',
+          payment_amount: 1.0,
+          payment_status: 'SUCCESS',
+        },
+      },
+    };
+    
+    console.log('[WebhookTest] Simulating webhook payload:', mockWebhookPayload);
+    
+    // Call the webhook handler via axios to simulate Cashfree's request
+    const response = await axios.post(
+      `http://localhost:${process.env.PORT || 5000}/api/payments/cashfree/webhook`,
+      mockWebhookPayload,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+    
+    res.json({ 
+      success: true, 
+      message: 'Test webhook sent to handler',
+      webhookResponse: response.data,
+    });
+  } catch (err) {
+    console.error('[WebhookTest] Error:', err.message);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message,
+    });
   }
 });
 
