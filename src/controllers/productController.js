@@ -1,10 +1,18 @@
 const pool = require('../config/database');
 
-// Convert image Buffer (LONGBLOB from MySQL) to base64 string
+// Convert image Buffer (LONGBLOB from MySQL) to base64 string.
+// The image was stored as a base64 string in the DB, so MySQL returns it as
+// a Buffer of those ASCII bytes — use toString('utf8') to recover the string.
 const toBase64 = (p) => {
   if (!p) return p;
-  if (p.image && Buffer.isBuffer(p.image)) {
-    p.image = p.image.toString('base64');
+  if (p.image) {
+    if (Buffer.isBuffer(p.image)) {
+      p.image = p.image.toString('utf8');
+    }
+    // Strip any accidental data-URI prefix stored in DB
+    if (typeof p.image === 'string' && p.image.startsWith('data:')) {
+      p.image = p.image.replace(/^data:[^;]+;base64,/, '');
+    }
   }
   return p;
 };
