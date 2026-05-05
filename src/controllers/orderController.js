@@ -90,18 +90,19 @@ const getUserOrders = async (req, res) => {
   }
 };
 
-// Get Farmer Received Orders
+// Get Farmer Received Orders (only paid orders)
 const getFarmerOrders = async (req, res) => {
   try {
     const farmerId = req.user.id;
 
-    // Get all orders that contain products from this farmer
+    // Get only PAID orders that contain products from this farmer
     const [orders] = await pool.query(
       `SELECT DISTINCT o.id, o.consumer_id, o.total_amount, o.payment_method, 
               o.payment_status, o.delivery_address, o.status, o.customer_name, 
               o.customer_email, o.customer_phone, o.items, o.created_at, o.updated_at
        FROM orders o
-       WHERE o.id IN (
+       WHERE o.payment_status = 'paid'
+       AND o.id IN (
          SELECT DISTINCT o2.id
          FROM orders o2
          INNER JOIN products p ON p.farmer_id = ?
@@ -365,7 +366,7 @@ const getOrderTracking = async (req, res) => {
 };
 
 
-// Delete Order (Consumer only — delivered or rejected orders)
+// Delete Order (Consumer only ï¿½ delivered or rejected orders)
 const deleteOrder = async (req, res) => {
   try {
     const { id } = req.params;
