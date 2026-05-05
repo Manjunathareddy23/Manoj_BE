@@ -620,5 +620,87 @@ router.get('/status/:orderId', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/payments/diagnose/:orderId
+// Diagnostic endpoint to debug payment status issues
+router.get('/diagnose/:orderId', authenticateToken, async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const pool = require('../config/database');
+    const { baseUrl, headers } = getCFConfig();
+
+    console.log(`\n[Diagnose] Checking order ${orderId}...`);
+
+    // Get order from database
+    const [orderRows] = await pool.execute(
+      'SELECT id, cf_order_id, payment_status, status FROM orders WHERE id = ?',
+      [orderId]
+    );
+
+    if (!orderRows.length) {
+      return res.status(404).json({ error: 'Order not found in database' });
+    }
+
+    const order = orderRows[0];
+    console.log('[Diagnose] Order in DB:', order);
+
+    const result = {
+      orderId,
+      databaseStatus: {
+        id: order.id,
+        cf_order_id: order.cf_order_id,
+        payment_status: order.payment_status,
+        status: order.status,
+      },
+      cashfreeStatus: null,
+      error: null,
+    };
+
+    // If no cf_order_id, we can't check Cashfree
+    if (!order.cf_order_id || order.cf_order_id === 'null' || order.cf_order_id === 'undefined') {
+      result.error = 'No cf_order_id in database - order was never sent to Cashfree';
+      return res.json(result);
+    }
+
+    // Query Cashfree
+    try {
+      const cfRes = await axios.get(
+        `${baseUrl}/orders/pay/fetch/${order.cf_order_id}`,
+        { headers, timeout: 10000 }
+      );
+
+      const payments = Array.isArray(cfRes.data) ? cfRes.data : [cfRes.data];
+      console.log('[Diagnose] Cashfree response:', payments);
+
+      result.cashfreeStatus = {
+        totalPayments: payments.length,
+        payments: payments.map(p => ({
+          cf_payment_id: p.cf_payment_id,
+          payment_status: p.payment_status,
+          payment_amount: p.payment_amount,
+          payment_method: p.payment_method,
+          created_at: p.created_at,
+        })),
+        hasPaidPayment: payments.some(p => p.payment_status === 'SUCCESS'),
+      };
+
+      // Check if we found a SUCCESS payment
+      const successPayment = payments.find(p => p.payment_status === 'SUCCESS');
+      if (successPayment) {
+        result.recommendation = `✅ Payment SUCCESS found in Cashfree! Database payment_status is "${order.payment_status}" but should be "paid". Call /api/payments/cashfree/sync/${orderId} to sync.`;
+      } else {
+        result.recommendation = '⚠️ No SUCCESS payment found in Cashfree. Check if payment was actually completed.';
+      }
+    } catch (cfErr) {
+      result.error = `Cashfree API error: ${cfErr.response?.data?.message || cfErr.message}`;
+      console.error('[Diagnose] Cashfree error:', cfErr.response?.data || cfErr.message);
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('[Diagnose] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
